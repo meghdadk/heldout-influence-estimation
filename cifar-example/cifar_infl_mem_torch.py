@@ -42,14 +42,28 @@ def batch_correctness(model, data_loader, device):
             correct += (predicted == targets).sum().item()
     return correct / total
 
-def load_cifar100(batch_size):
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
 
-    train_dataset = datasets.CIFAR100(root='./data', train=True, download=True, transform=transform)
-    test_dataset = datasets.CIFAR100(root='./data', train=False, download=True, transform=transform)
+def _get_cifar_transforms(augment=False):
+    transform_augment = transforms.Compose([
+        transforms.Pad(padding=4, fill=(125,123,113)),
+        transforms.RandomCrop(32, padding=0),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
+    transform_test = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+    ])
+    transform_train = transform_augment if augment else transform_test
+
+    return transform_train, transform_test
+
+def load_cifar10(batch_size):
+    transform_train, transform_test = _get_cifar_transforms(augment=False)
+
+    train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform_train)
+    test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform_test)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
@@ -73,15 +87,15 @@ def subset_train(seed, subset_ratio, batch_size, num_epochs):
     np.random.seed(seed)
 
 
-    train_loader, test_loader = load_cifar100(batch_size)
+    train_loader, test_loader = load_cifar10(batch_size)
 
-    model = models.resnet50()
-    model.fc = nn.Linear(2048, 100)  # CIFAR-100 has 100 classes
+    model = models.resnet18()
+    model.fc = nn.Linear(512, 10)  # CIFAR-100 has 100 classes
 
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.1, weight_decay=5e-4)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay=5e-4)
     scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
     num_train_total = len(train_loader.dataset)
@@ -181,7 +195,7 @@ def show_cifar100_examples(estimates, n_show=10):
 if __name__ == '__main__':
     num_runs = 1
     subset_ratio = 0.7
-    batch_size = 256
+    batch_size = 128
     num_epochs = 30
 
     estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, num_epochs)
