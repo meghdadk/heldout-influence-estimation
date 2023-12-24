@@ -11,9 +11,9 @@ import matplotlib.pyplot as plt
 import jax.numpy as jnp
 from jax.config import config
 from jax import jit, grad, random
-from jax.experimental import optimizers
-from jax.experimental import stax
-from jax.experimental.stax import Flatten, Dense, Relu, LogSoftmax
+from jax.example_libraries import optimizers
+from jax.example_libraries import stax
+from jax.example_libraries.stax import Flatten, Dense, Relu, LogSoftmax
 
 import tensorflow_datasets as tfds
 
@@ -118,7 +118,7 @@ def subset_train(seed, subset_ratio):
 
 
 def estimate_infl_mem():
-  n_runs = 2000
+  n_runs = 20
   subset_ratio = 0.7
   
   results = []
