@@ -30,6 +30,16 @@ class SubsetSampler(SubsetRandomSampler):
 def loss(output, target):
     return -torch.mean(torch.sum(output * target, dim=1))
 
+def adjust_learning_rate(epoch, lr_dict, optimizer):
+    """Sets the learning rate to the initial LR decayed by decay rate every steep step"""
+    steps = np.sum(epoch > np.asarray(lr_dict['lr_decay_epochs']))
+    new_lr = lr_dict['learning_rate']
+    if steps > 0:
+        new_lr = lr_dict['learning_rate'] * (lr_dict['lr_decay_rate'] ** steps)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = new_lr
+    return new_lr
+
 def batch_correctness(model, data_loader, device):
     correct = 0
     total = 0
@@ -70,9 +80,14 @@ def load_cifar10(batch_size):
 
     return train_loader, test_loader
 
-def train_model(model, train_loader, num_epochs, criterion, optimizer, scheduler, device):
+def train_model(model, train_loader, device):
+    num_epochs = 30
+    criterion = nn.CrossEntropyLoss().to(device)
+    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4)
+    lr_dict = {'learning_rate': 0.01, 'lr_decay_epochs': [15,20,25], 'lr_decay_rate': 0.1}
     model.train()
     for epoch in tqdm(range(num_epochs)):
+        adjust_learning_rate(epoch, lr_dict, optimizer)
         for inputs, targets in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
             optimizer.zero_grad()
@@ -80,9 +95,8 @@ def train_model(model, train_loader, num_epochs, criterion, optimizer, scheduler
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
-            scheduler.step()
 
-def subset_train(seed, subset_ratio, batch_size, num_epochs):
+def subset_train(seed, subset_ratio, batch_size):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -91,12 +105,9 @@ def subset_train(seed, subset_ratio, batch_size, num_epochs):
 
     model = models.resnet18()
     model.fc = nn.Linear(512, 10)  # CIFAR-100 has 100 classes
-
     model.to(device)
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay=5e-4)
-    scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    #scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
     num_train_total = len(train_loader.dataset)
     num_train = int(num_train_total * subset_ratio)
@@ -105,7 +116,7 @@ def subset_train(seed, subset_ratio, batch_size, num_epochs):
     subset_sampler = SubsetSampler(np.random.choice(num_train_total, size=num_train, replace=False))
     train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
 
-    train_model(model, train_loader, num_epochs, criterion, optimizer, scheduler, device)
+    train_model(model, train_loader, device)
     model.eval()
 
     trainset_correctness = batch_correctness(model, train_loader, device)
@@ -137,11 +148,11 @@ def subset_train(seed, subset_ratio, batch_size, num_epochs):
 
     return trainset_mask, trainset_correctness, testset_correctness
 
-def estimate_infl_mem(num_runs, subset_ratio, batch_size, num_epochs):
+def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     results = []
 
     for i_run in range(num_runs):
-        results.append(subset_train(i_run, subset_ratio, batch_size, num_epochs))
+        results.append(subset_train(i_run, subset_ratio, batch_size))
 
     trainset_mask = np.vstack([ret[0] for ret in results])
     inv_mask = np.logical_not(trainset_mask)
@@ -193,12 +204,11 @@ def show_cifar100_examples(estimates, n_show=10):
 
 
 if __name__ == '__main__':
-    num_runs = 1
+    num_runs = 5
     subset_ratio = 0.7
     batch_size = 128
-    num_epochs = 30
 
-    estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, num_epochs)
+    estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size)
     # You can use the estimates dictionary for further analysis or visualization
 
     np.savez('estimates_results.npz', **estimates)
