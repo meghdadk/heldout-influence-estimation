@@ -237,8 +237,8 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     return dict(memorization=mem_est, influence=infl_est)
 
 def show_examples(estimates, n_show=10):
+    cifar10_train_loader, cifar10_test_loader = load_cifar10(128)
     def show_image(ax, image, title=None):
-        image = F.to_pil_image(image)
         ax.axis('off')
         ax.imshow(image)
         if title is not None:
@@ -253,15 +253,15 @@ def show_examples(estimates, n_show=10):
     for i in range(n_show):
         # show test example
         idx_tt = idx_sorted[i]
-        label_tt = mnist_data['test_int_labels'][idx_tt]
-        show_image(axs[i, 0], mnist_data['test_byte_images'][idx_tt],
+        label_tt = cifar10_test_loader.dataset.targets[idx_tt]
+        show_image(axs[i, 0], cifar10_test_loader.dataset.data[idx_tt],
                    title=f'test, L={label_tt}')
 
         def _show_contexts(idx_list, ax_offset):
             for j, idx_tr in enumerate(idx_list):
-                label_tr = mnist_data['train_int_labels'][idx_tr]
+                label_tr = cifar10_train_loader.dataset.targets[idx_tr]
                 infl = estimates['influence'][idx_tt, idx_tr]
-                show_image(axs[i, j + ax_offset], mnist_data['train_byte_images'][idx_tr],
+                show_image(axs[i, j + ax_offset], cifar10_train_loader.dataset.data[idx_tr],
                            title=f'tr, L={label_tr}, infl={infl:.3f}')
 
         # show training examples with highest influence
@@ -269,26 +269,29 @@ def show_examples(estimates, n_show=10):
         _show_contexts(idx_sorted_tr[:n_context1], 1)
 
         # show random training examples from the same class
-        idx_class = np.nonzero(mnist_data['train_int_labels'] == label_tt)[0]
+        idx_class = np.nonzero(np.array(cifar10_train_loader.dataset.targets) == label_tt)[0]
         idx_random = np.random.choice(idx_class, size=n_context2, replace=False)
         _show_contexts(idx_random, n_context1 + 1)
 
     plt.tight_layout()
-    plt.savefig("cifar10-examples.png")
-    plt.show()
+    plt.savefig('cifar10-examples.pdf', bbox_inches='tight')
 
 if __name__ == '__main__':
     num_runs = 2
     subset_ratio = 0.7
     batch_size = 128
 
-    estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size)
-    # You can use the estimates dictionary for further analysis or visualization
+    npz_fn = 'estimates_results.npz'
+    if os.path.exists(npz_fn):
+        estimates = np.load(npz_fn)
+    else:
+        estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size)
+        np.savez('estimates_results.npz', **estimates)
 
-    np.savez('estimates_results.npz', **estimates)
+    show_examples(estimates)
 
-    #show_examples(estimates)
-
-    #loaded_results = np.load('estimates_results.npz')
-    #loaded_memorization = loaded_results['memorization']
+    loaded_results = np.load('estimates_results.npz')
+    loaded_memorization = loaded_results['memorization']
     #loaded_influence = loaded_results['influence']
+
+    print (loaded_memorization[:10])
