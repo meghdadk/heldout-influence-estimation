@@ -105,7 +105,7 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     train_loader, test_loader = load_cifar10(batch_size)
 
     model = models.resnet18()
-    model.fc = nn.Linear(512, 10)  # CIFAR-100 has 100 classes
+    model.fc = nn.Linear(512, 10)  # CIFAR-10 has 10 classes
     model.to(device)
 
     #scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
@@ -230,6 +230,7 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
 
     mem_est = _masked_avg(trainset_correctness, trainset_mask) - _masked_avg(trainset_correctness, inv_mask)
     infl_est = _masked_dot(testset_correctness, trainset_mask) - _masked_dot(testset_correctness, inv_mask)
+
 
     print(mem_est.shape, infl_est.shape)
 
