@@ -115,7 +115,7 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     num_batches = int(np.ceil(num_train / batch_size))
 
     subset_sampler = SubsetSampler(np.random.choice(num_train_total, size=num_train, replace=False))
-    #train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
+    sub_train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
 
 
     chkpt_path = os.path.join(save_dir, 'resnet18_cifar10_model{}.pt'.format(seed))
@@ -131,23 +131,21 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     trainset_mask[subset_sampler.indices] = True
 
     # Compute accuracy on the selected subsample
-    #selected_subset_correctness = batch_correctness(model, train_loader, device)
+    selected_subset_correctness = batch_correctness(model, sub_train_loader, device)
 
     # Create a DataLoader for the left-out subsample
-    #left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
-    #left_out_sampler = SubsetSampler(left_out_indices)
-    #left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
+    left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
+    left_out_sampler = SubsetSampler(left_out_indices)
+    left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
 
     # Compute accuracy on the left-out subsample
-    #left_out_subset_correctness = batch_correctness(model, left_out_loader, device)
+    left_out_subset_correctness = batch_correctness(model, left_out_loader, device)
 
-    # Compute accuracy on the test data
-    #testset_correctness = batch_correctness(model, test_loader, device)
 
     # Print accuracies
-    #print(f"Selected Subset Train Accuracy: {selected_subset_correctness:.4f}")
-    #print(f"Left-Out Subset Train Accuracy: {left_out_subset_correctness:.4f}")
-    #print(f"Test Accuracy: {testset_correctness:.4f}")
+    print(f"Selected Subset Train Accuracy: {np.mean(selected_subset_correctness):.4f}")
+    print(f"Left-Out Subset Train Accuracy: {np.mean(left_out_subset_correctness):.4f}")
+    print(f"Test Accuracy: {np.mean(testset_correctness):.4f}")
 
 
     return trainset_mask, trainset_correctness, testset_correctness
@@ -170,10 +168,10 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     num_batches = int(np.ceil(num_train / batch_size))
 
     subset_sampler = SubsetSampler(np.random.choice(num_train_total, size=num_train, replace=False))
-    train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
+    sub_train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
 
 
-    train_model(model, train_loader, device)
+    train_model(model, sub_train_loader, device)
     model.eval()
 
 
@@ -184,7 +182,7 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     trainset_mask[subset_sampler.indices] = True
 
     # Compute accuracy on the selected subsample
-    selected_subset_correctness = batch_correctness(model, train_loader, device)
+    selected_subset_correctness = batch_correctness(model, sub_train_loader, device)
 
     # Create a DataLoader for the left-out subsample
     left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
@@ -194,13 +192,11 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     # Compute accuracy on the left-out subsample
     left_out_subset_correctness = batch_correctness(model, left_out_loader, device)
 
-    # Compute accuracy on the test data
-    testset_correctness = batch_correctness(model, test_loader, device)
 
     # Print accuracies
-    print(f"Selected Subset Train Accuracy: {selected_subset_correctness:.4f}")
-    print(f"Left-Out Subset Train Accuracy: {left_out_subset_correctness:.4f}")
-    print(f"Test Accuracy: {testset_correctness:.4f}")
+    print(f"Selected Subset Train Accuracy: {np.mean(selected_subset_correctness):.4f}")
+    print(f"Left-Out Subset Train Accuracy: {np.mean(left_out_subset_correctness):.4f}")
+    print(f"Test Accuracy: {np.mean(testset_correctness):.4f}")
 
 
     if not os.path.exists(save_dir):
@@ -234,6 +230,8 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
 
     mem_est = _masked_avg(trainset_correctness, trainset_mask) - _masked_avg(trainset_correctness, inv_mask)
     infl_est = _masked_dot(testset_correctness, trainset_mask) - _masked_dot(testset_correctness, inv_mask)
+
+    print(mem_est.shape, infl_est.shape)
 
     return dict(memorization=mem_est, influence=infl_est)
 
@@ -279,7 +277,7 @@ def show_examples(estimates, n_show=10):
     plt.show()
 
 if __name__ == '__main__':
-    num_runs = 500
+    num_runs = 2
     subset_ratio = 0.7
     batch_size = 128
 
