@@ -41,7 +41,8 @@ def adjust_learning_rate(epoch, lr_dict, optimizer):
             param_group['lr'] = new_lr
     return new_lr
 
-def batch_correctness(model, data_loader, device):
+def batch_correctness(model, dataset, device, batch_size=1024):
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
     correctness_list = []
 
     with torch.no_grad():
@@ -52,7 +53,6 @@ def batch_correctness(model, data_loader, device):
             correctness_list.append(predicted == targets)
 
     return torch.cat(correctness_list).detach().cpu().numpy()
-
 
 def _get_cifar_transforms(augment=False):
     transform_augment = transforms.Compose([
@@ -124,14 +124,14 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     model.eval()
 
 
-    trainset_correctness = batch_correctness(model, train_loader, device)
-    testset_correctness = batch_correctness(model, test_loader, device)
+    trainset_correctness = batch_correctness(model, train_loader.dataset, device)
+    testset_correctness = batch_correctness(model, test_loader.dataset, device)
 
     trainset_mask = np.zeros(num_train_total, dtype=np.bool)
     trainset_mask[subset_sampler.indices] = True
 
     # Compute accuracy on the selected subsample
-    selected_subset_correctness = batch_correctness(model, sub_train_loader, device)
+    selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
 
     # Create a DataLoader for the left-out subsample
     left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
@@ -139,7 +139,7 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
 
     # Compute accuracy on the left-out subsample
-    left_out_subset_correctness = batch_correctness(model, left_out_loader, device)
+    left_out_subset_correctness = batch_correctness(model, left_out_loader.dataset, device)
 
 
     # Print accuracies
@@ -175,14 +175,14 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     model.eval()
 
 
-    trainset_correctness = batch_correctness(model, train_loader, device)
-    testset_correctness = batch_correctness(model, test_loader, device)
+    trainset_correctness = batch_correctness(model, train_loader.dataset, device)
+    testset_correctness = batch_correctness(model, test_loader.dataset, device)
 
     trainset_mask = np.zeros(num_train_total, dtype=np.bool)
     trainset_mask[subset_sampler.indices] = True
 
     # Compute accuracy on the selected subsample
-    selected_subset_correctness = batch_correctness(model, sub_train_loader, device)
+    selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
 
     # Create a DataLoader for the left-out subsample
     left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
@@ -190,7 +190,7 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
 
     # Compute accuracy on the left-out subsample
-    left_out_subset_correctness = batch_correctness(model, left_out_loader, device)
+    left_out_subset_correctness = batch_correctness(model, left_out_loader.dataset, device)
 
 
     # Print accuracies
@@ -210,7 +210,7 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
 def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     results = []
 
-    for i_run in range(0, 4, 1):
+    for i_run in range(0, num_runs, 1):
         #results.append(subset_train(i_run, subset_ratio, batch_size))
         results.append(subset_load(i_run, subset_ratio, batch_size))
 
@@ -219,7 +219,6 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     trainset_correctness = np.vstack([ret[1] for ret in results])
     testset_correctness = np.vstack([ret[2] for ret in results])
 
-    print(f'Avg test acc = {np.mean(testset_correctness):.4f}')
 
     def _masked_avg(x, mask, axis=0, esp=1e-10):
         return (np.sum(x * mask, axis=axis) / np.maximum(np.sum(mask, axis=axis), esp)).astype(np.float32)
@@ -231,8 +230,8 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     mem_est = _masked_avg(trainset_correctness, trainset_mask) - _masked_avg(trainset_correctness, inv_mask)
     infl_est = _masked_dot(testset_correctness, trainset_mask) - _masked_dot(testset_correctness, inv_mask)
 
-
-    print(mem_est.shape, infl_est.shape)
+    print(f'Avg test acc = {np.mean(testset_correctness):.4f} ± {np.std(testset_correctness):.4f}')
+    print("memory array shape: ", mem_est.shape, "influence shape: ", infl_est.shape)
 
     return dict(memorization=mem_est, influence=infl_est)
 
@@ -277,7 +276,7 @@ def show_examples(estimates, n_show=10):
     plt.savefig('cifar10-examples.pdf', bbox_inches='tight')
 
 if __name__ == '__main__':
-    num_runs = 2
+    num_runs = 400
     subset_ratio = 0.7
     batch_size = 128
 
@@ -292,6 +291,7 @@ if __name__ == '__main__':
 
     loaded_results = np.load('estimates_results.npz')
     loaded_memorization = loaded_results['memorization']
-    #loaded_influence = loaded_results['influence']
+    loaded_influence = loaded_results['influence']
 
-    print (loaded_memorization[:10])
+    print (np.sum(loaded_memorization > 0))
+    print (loaded_memorization.shape, np.max(loaded_memorization), np.min(loaded_memorization))
