@@ -87,6 +87,34 @@ def load_cifar10(batch_size):
 
     return train_loader, test_loader
 
+def save_seed_indices(seed, subset_ratio, batch_size, save_dir="checkpoints"):
+
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
+
+    train_loader, test_loader = load_cifar10(batch_size)
+
+    model = models.resnet18()
+    model.fc = nn.Linear(512, 10)  # CIFAR-10 has 10 classes
+
+    num_train_total = len(train_loader.dataset)
+    num_train = int(num_train_total * subset_ratio)
+    num_batches = int(np.ceil(num_train / batch_size))
+
+    subset_sampler = SubsetSampler(np.random.choice(num_train_total, size=num_train, replace=False))
+    sub_train_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=subset_sampler)
+
+
+    trainset_mask = np.zeros(num_train_total, dtype=np.bool)
+    trainset_mask[subset_sampler.indices] = True
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    np.save(os.path.join(save_dir, 'resnet18_cifar10_indices{}.npy'.format(seed)), trainset_mask)
+
+
 def train_model(model, train_loader, device):
     num_epochs = 30
     criterion = nn.CrossEntropyLoss().to(device)
@@ -247,6 +275,7 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size, load=True):
     results = []
 
     for i_run in range(0, num_runs,1):
+        #save_seed_indices(i_run, subset_ratio, batch_size)
         if load:
             results.append(subset_load(i_run, subset_ratio, batch_size, _type="feldman"))
         else:
@@ -295,8 +324,6 @@ def estimate_likelihood_ratio(num_runs, subset_ratio, batch_size, load=True):
 
     return dict(likelihood_ratios=distance)
 
-    
-
 def show_examples(estimates, n_show=10):
     cifar10_train_loader, cifar10_test_loader = load_cifar10(128)
     def show_image(ax, image, title=None):
@@ -338,10 +365,11 @@ def show_examples(estimates, n_show=10):
     plt.savefig('cifar10-examples.pdf', bbox_inches='tight')
 
 if __name__ == '__main__':
-    num_runs = 400
+    num_runs = 432
     subset_ratio = 0.7
     batch_size = 512
     load_checkpoints = True
+
 
     npz_fn = 'estimates_results.npz'
     if os.path.exists(npz_fn) and os.path.exists('estimate_likelihoods.npz'):
@@ -349,40 +377,31 @@ if __name__ == '__main__':
         likelihoods = np.load('estimate_likelihoods.npz')
 
     else:
-        #estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, load=load_checkpoints)
-        #np.savez('estimates_results.npz', **estimates)
+        estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, load=load_checkpoints)
+        np.savez('estimates_results.npz', **estimates)
         #likelihoods = estimate_likelihood_ratio(num_runs, subset_ratio, batch_size, load=load_checkpoints)
         #np.savez('estimate_likelihoods.npz', **likelihoods)
-        pass
         
-
     #show_examples(estimates)
 
     loaded_results = np.load('estimates_results.npz')
     loaded_memorization = loaded_results['memorization']
     loaded_influence = loaded_results['influence']
 
-    loaded_results = np.load('estimate_likelihoods.npz')
-    loaded_likelihoods = loaded_results['likelihood_ratios']
+    #loaded_results = np.load('estimate_likelihoods.npz')
+    #loaded_likelihoods = loaded_results['likelihood_ratios']
 
-    
-
-    plt.hist(loaded_memorization, bins=1000)
-    plt.xlabel('Loaded Memorization')
-    plt.ylabel('Frequency')
-    plt.title('Histogram of Loaded Memorization')
-    plt.savefig("loaded_memorization.png")
 
     #print (np.sum(loaded_memorization > 0))
     #print (loaded_memorization.shape, np.max(loaded_memorization), np.min(loaded_memorization))
     #print (loaded_likelihoods.shape, np.max(loaded_likelihoods), np.min(loaded_likelihoods))
 
     # Get the sorted indices of each array
-    sorted_indices_a = np.argsort(loaded_memorization)
-    sorted_indices_b = np.argsort(loaded_likelihoods)
+    #sorted_indices_a = np.argsort(loaded_memorization)
+    #sorted_indices_b = np.argsort(loaded_likelihoods)
 
     # Check if the sorted indices are the same
-    are_indices_same = np.array_equal(sorted_indices_a, sorted_indices_b)
+    #are_indices_same = np.array_equal(sorted_indices_a, sorted_indices_b)
 
     #print(f"Sorted indices of a: {sorted_indices_a[:10]}")
     #print(f"Sorted indices of b: {sorted_indices_b[:10]}")
