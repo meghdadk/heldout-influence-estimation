@@ -43,18 +43,8 @@ def load_cifar10(batch_size):
 
     return train_loader, test_loader
 
-if __name__ == "__main__":
-    npz_fn = 'estimates_results.npz'
-    if os.path.exists(npz_fn):
-        estimates = np.load(npz_fn)
-    else:
-        raise AttributeError("estimation file does not exist", npz_fn)
 
-
-    loaded_results = np.load('estimates_results.npz')
-    memorizations = loaded_results['memorization']
-    influences = loaded_results['influence']
-
+def random_selection(memorizations, influences):
     N = len(memorizations)
     M = len(influences)
 
@@ -84,3 +74,47 @@ if __name__ == "__main__":
     selected_test_indices = np.array(selected_test_indices)
 
     print (np.max(influences[:, 28845]), np.min(influences[:,28845]))
+
+def select_high_influence(memorizations, influences):
+    N = len(memorizations)
+    M = len(influences)
+
+    # Iterate over all train data points and select the ones with at least one influence bigger than 0.8
+    selected_train_indices = []
+    for train_index in range(N):
+        # Get influence scores for the current train data point
+        scores = influences[:, train_index]
+
+        # Check if there is at least one influence bigger than 0.8
+        if np.any(scores > 0.8):
+            selected_train_indices.append(train_index)
+
+        # Stop the iteration when 10 train data points are selected
+        if len(selected_train_indices) == 10:
+            break
+
+    # For each selected train data point, find 10 test data points with the highest influence
+    for train_index in selected_train_indices:
+        # Get influence scores for the current train data point
+        scores = influences[:, train_index]
+
+        # Find indices of top 10 test data points with highest influence
+        top_test_indices = np.argsort(scores)[-10:]
+
+        # Print train index, memorization score, and sorted list of selected test influences
+        print(f"{train_index}, {memorizations[train_index]:.2f},", "\t", f"{', '.join(map(lambda x: f'{scores[x]:.2f}', top_test_indices))}")
+
+if __name__ == "__main__":
+    npz_fn = 'estimates_results.npz'
+    if os.path.exists(npz_fn):
+        estimates = np.load(npz_fn)
+    else:
+        raise AttributeError("estimation file does not exist", npz_fn)
+
+
+    loaded_results = np.load('estimates_results.npz')
+    memorizations = loaded_results['memorization']
+    influences = loaded_results['influence']
+
+
+    select_high_influence(memorizations, influences)

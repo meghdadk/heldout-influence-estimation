@@ -1,6 +1,7 @@
 import numpy as np
 import os
 from tqdm import tqdm
+from scipy.stats import norm
 
 import matplotlib.pyplot as plt
 
@@ -12,7 +13,12 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader, SubsetRandomSampler
 import torchvision.models as models
 import torchvision.transforms as transforms
-import torchvision.transforms.functional as F
+from torch.utils.data import Subset
+import numpy as np
+from scipy.stats import norm
+
+import torch.nn.functional as F
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -97,7 +103,9 @@ def train_model(model, train_loader, device):
             loss.backward()
             optimizer.step()
     
-def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
+def subset_load(seed, subset_ratio, batch_size, _type="feldman", save_dir="checkpoints"):
+    assert _type.lower() in ['feldman', 'carlini']
+
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -123,34 +131,58 @@ def subset_load(seed, subset_ratio, batch_size, save_dir="checkpoints"):
 
     model.eval()
 
+    if _type.lower() == 'carlini':
+        trainset_mask = np.zeros(num_train_total, dtype=np.bool)
+        trainset_mask[subset_sampler.indices] = True
 
-    trainset_correctness = batch_correctness(model, train_loader.dataset, device)
-    testset_correctness = batch_correctness(model, test_loader.dataset, device)
+        criterion = nn.CrossEntropyLoss(reduction='none').to(device)
+        losses = []
 
-    trainset_mask = np.zeros(num_train_total, dtype=np.bool)
-    trainset_mask[subset_sampler.indices] = True
+        for inputs, targets in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = model(inputs)
+            
+            # Compute loss for each data point in the batch
+            loss = criterion(outputs, targets)
+            
+            # Extend the losses list with the loss of each data point
+            losses.extend(loss.detach().cpu().tolist())
 
-    # Compute accuracy on the selected subsample
-    selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
+        losses = np.array(losses)
+        return trainset_mask, losses
+        
+    elif _type.lower() == 'feldman':
+        trainset_correctness = batch_correctness(model, train_loader.dataset, device)
+        testset_correctness = batch_correctness(model, test_loader.dataset, device)
 
-    # Create a DataLoader for the left-out subsample
-    left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
-    left_out_sampler = SubsetSampler(left_out_indices)
-    left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
+        # Create a subset of the dataset for the selected indices
+        subset_dataset = Subset(train_loader.dataset, subset_sampler.indices)
+        sub_train_loader = DataLoader(subset_dataset, batch_size=batch_size)
 
-    # Compute accuracy on the left-out subsample
-    left_out_subset_correctness = batch_correctness(model, left_out_loader.dataset, device)
-
-
-    # Print accuracies
-    print(f"Selected Subset Train Accuracy: {np.mean(selected_subset_correctness):.4f}")
-    print(f"Left-Out Subset Train Accuracy: {np.mean(left_out_subset_correctness):.4f}")
-    print(f"Test Accuracy: {np.mean(testset_correctness):.4f}")
+        # Create a DataLoader for the left-out subsample
+        left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
+        left_out_dataset = Subset(train_loader.dataset, left_out_indices)
+        left_out_loader = DataLoader(left_out_dataset, batch_size=batch_size)
 
 
-    return trainset_mask, trainset_correctness, testset_correctness
+        trainset_mask = np.zeros(num_train_total, dtype=np.bool)
+        trainset_mask[subset_sampler.indices] = True
 
-def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_trained=True):
+        # Compute accuracy on the subsamples
+        selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
+        left_out_subset_correctness = batch_correctness(model, left_out_loader.dataset, device)
+
+        print ("sub_train_loader.dataset: ", len(sub_train_loader.dataset), "left_out_loader.dataset: ", len(left_out_loader.dataset))
+
+        # Print accuracies
+        print(f"Selected Subset Train Accuracy: {np.mean(selected_subset_correctness):.4f}")
+        print(f"Left-Out Subset Train Accuracy: {np.mean(left_out_subset_correctness):.4f}")
+        print(f"Test Accuracy: {np.mean(testset_correctness):.4f}")
+
+
+        return trainset_mask, trainset_correctness, testset_correctness
+
+def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints"):
     torch.manual_seed(seed)
     np.random.seed(seed)
 
@@ -158,7 +190,7 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     train_loader, test_loader = load_cifar10(batch_size)
 
     model = models.resnet18()
-    model.fc = nn.Linear(512, 10)  # CIFAR-100 has 100 classes
+    model.fc = nn.Linear(512, 10)
     model.to(device)
 
     #scheduler = lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
@@ -178,20 +210,24 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
     trainset_correctness = batch_correctness(model, train_loader.dataset, device)
     testset_correctness = batch_correctness(model, test_loader.dataset, device)
 
-    trainset_mask = np.zeros(num_train_total, dtype=np.bool)
-    trainset_mask[subset_sampler.indices] = True
-
-    # Compute accuracy on the selected subsample
-    selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
+    # Create a subset of the dataset for the selected indices
+    subset_dataset = Subset(train_loader.dataset, subset_sampler.indices)
+    sub_train_loader = DataLoader(subset_dataset, batch_size=batch_size)
 
     # Create a DataLoader for the left-out subsample
     left_out_indices = np.setdiff1d(np.arange(num_train_total), subset_sampler.indices)
-    left_out_sampler = SubsetSampler(left_out_indices)
-    left_out_loader = DataLoader(train_loader.dataset, batch_size=batch_size, sampler=left_out_sampler)
+    left_out_dataset = Subset(train_loader.dataset, left_out_indices)
+    left_out_loader = DataLoader(left_out_dataset, batch_size=batch_size)
 
-    # Compute accuracy on the left-out subsample
+
+    trainset_mask = np.zeros(num_train_total, dtype=np.bool)
+    trainset_mask[subset_sampler.indices] = True
+
+    # Compute accuracy on the subsamples
+    selected_subset_correctness = batch_correctness(model, sub_train_loader.dataset, device)
     left_out_subset_correctness = batch_correctness(model, left_out_loader.dataset, device)
 
+    print ("sub_train_loader.dataset: ", len(sub_train_loader.dataset), "left_out_loader.dataset: ", len(left_out_loader.dataset))
 
     # Print accuracies
     print(f"Selected Subset Train Accuracy: {np.mean(selected_subset_correctness):.4f}")
@@ -207,12 +243,14 @@ def subset_train(seed, subset_ratio, batch_size, save_dir="checkpoints", load_tr
 
     return trainset_mask, trainset_correctness, testset_correctness
 
-def estimate_infl_mem(num_runs, subset_ratio, batch_size):
+def estimate_infl_mem(num_runs, subset_ratio, batch_size, load=True):
     results = []
 
-    for i_run in range(0, num_runs, 1):
-        #results.append(subset_train(i_run, subset_ratio, batch_size))
-        results.append(subset_load(i_run, subset_ratio, batch_size))
+    for i_run in range(0, num_runs,1):
+        if load:
+            results.append(subset_load(i_run, subset_ratio, batch_size, _type="feldman"))
+        else:
+            results.append(subset_train(i_run, subset_ratio, batch_size))
 
     trainset_mask = np.vstack([ret[0] for ret in results])
     inv_mask = np.logical_not(trainset_mask)
@@ -234,6 +272,30 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size):
     print("memory array shape: ", mem_est.shape, "influence shape: ", infl_est.shape)
 
     return dict(memorization=mem_est, influence=infl_est)
+
+def estimate_likelihood_ratio(num_runs, subset_ratio, batch_size, load=True):
+    results = []
+
+    for i_run in range(0, num_runs, 1):
+        if load:
+            results.append(subset_load(i_run, subset_ratio, batch_size, _type="carlini"))
+        else:
+            results.append(subset_train(i_run, subset_ratio, batch_size))
+
+    trainset_mask = np.vstack([ret[0] for ret in results])
+    inv_mask = np.logical_not(trainset_mask)
+    trainset_losses = np.vstack([ret[1] for ret in results])
+
+
+    in_means = np.nanmean(np.where(trainset_mask, trainset_losses, np.nan), axis=0)
+    out_means = np.nanmean(np.where(~trainset_mask, trainset_losses, np.nan), axis=0)
+    
+
+    distance = np.abs(in_means - out_means)
+
+    return dict(likelihood_ratios=distance)
+
+    
 
 def show_examples(estimates, n_show=10):
     cifar10_train_loader, cifar10_test_loader = load_cifar10(128)
@@ -278,20 +340,50 @@ def show_examples(estimates, n_show=10):
 if __name__ == '__main__':
     num_runs = 400
     subset_ratio = 0.7
-    batch_size = 128
+    batch_size = 512
+    load_checkpoints = True
 
     npz_fn = 'estimates_results.npz'
-    if os.path.exists(npz_fn):
+    if os.path.exists(npz_fn) and os.path.exists('estimate_likelihoods.npz'):
         estimates = np.load(npz_fn)
-    else:
-        estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size)
-        np.savez('estimates_results.npz', **estimates)
+        likelihoods = np.load('estimate_likelihoods.npz')
 
-    show_examples(estimates)
+    else:
+        #estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, load=load_checkpoints)
+        #np.savez('estimates_results.npz', **estimates)
+        #likelihoods = estimate_likelihood_ratio(num_runs, subset_ratio, batch_size, load=load_checkpoints)
+        #np.savez('estimate_likelihoods.npz', **likelihoods)
+        pass
+        
+
+    #show_examples(estimates)
 
     loaded_results = np.load('estimates_results.npz')
     loaded_memorization = loaded_results['memorization']
     loaded_influence = loaded_results['influence']
 
-    print (np.sum(loaded_memorization > 0))
-    print (loaded_memorization.shape, np.max(loaded_memorization), np.min(loaded_memorization))
+    loaded_results = np.load('estimate_likelihoods.npz')
+    loaded_likelihoods = loaded_results['likelihood_ratios']
+
+    
+
+    plt.hist(loaded_memorization, bins=1000)
+    plt.xlabel('Loaded Memorization')
+    plt.ylabel('Frequency')
+    plt.title('Histogram of Loaded Memorization')
+    plt.savefig("loaded_memorization.png")
+
+    #print (np.sum(loaded_memorization > 0))
+    #print (loaded_memorization.shape, np.max(loaded_memorization), np.min(loaded_memorization))
+    #print (loaded_likelihoods.shape, np.max(loaded_likelihoods), np.min(loaded_likelihoods))
+
+    # Get the sorted indices of each array
+    sorted_indices_a = np.argsort(loaded_memorization)
+    sorted_indices_b = np.argsort(loaded_likelihoods)
+
+    # Check if the sorted indices are the same
+    are_indices_same = np.array_equal(sorted_indices_a, sorted_indices_b)
+
+    #print(f"Sorted indices of a: {sorted_indices_a[:10]}")
+    #print(f"Sorted indices of b: {sorted_indices_b[:10]}")
+    #print(f"Are the sorted indices the same? {are_indices_same}")
