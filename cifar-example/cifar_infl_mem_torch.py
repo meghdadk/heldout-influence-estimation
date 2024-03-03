@@ -275,7 +275,7 @@ def estimate_infl_mem(num_runs, subset_ratio, batch_size, load=True):
     results = []
 
     for i_run in range(0, num_runs,1):
-        #save_seed_indices(i_run, subset_ratio, batch_size)
+        save_seed_indices(i_run, subset_ratio, batch_size)
         if load:
             results.append(subset_load(i_run, subset_ratio, batch_size, _type="feldman"))
         else:
@@ -367,14 +367,14 @@ def show_examples(estimates, n_show=10):
 if __name__ == '__main__':
     num_runs = 432
     subset_ratio = 0.7
-    batch_size = 512
+    batch_size = 128
     load_checkpoints = True
 
 
     npz_fn = 'estimates_results.npz'
-    if os.path.exists(npz_fn) and os.path.exists('estimate_likelihoods.npz'):
+    if os.path.exists(npz_fn):
         estimates = np.load(npz_fn)
-        likelihoods = np.load('estimate_likelihoods.npz')
+        #likelihoods = np.load('estimate_likelihoods.npz')
 
     else:
         estimates = estimate_infl_mem(num_runs, subset_ratio, batch_size, load=load_checkpoints)
